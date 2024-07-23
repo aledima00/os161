@@ -1,0 +1,11 @@
+build/
+common/
+design/
+man/
+mk/
+testscripts/
+userland/
+CHANGES
+configure
+defs.mk
+Makefile
