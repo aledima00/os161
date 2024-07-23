@@ -11,6 +11,7 @@
 #include <syscall.h>
 #include <current.h>
 #include <lib.h>
+#include "opt-c2.h"
 
 #if OPT_C2
 
