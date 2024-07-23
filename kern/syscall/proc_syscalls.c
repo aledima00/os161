@@ -130,4 +130,13 @@ int sys_fork(struct trapframe *ctf, pid_t *retval) {
 
   return 0;
 }
+
+/* c2 - Alessandro Di Matteo [START] */
+/* internal implementation of the syscall sys_execv(...). */
+
+int sys_execv(const char *pathname, char *const argv[]){
+}
+
+/* c2 - Alessandro Di Matteo [END] */
+
 #endif

@@ -73,6 +73,23 @@ int sys_waitpid(pid_t pid, userptr_t statusp, int options);
 pid_t sys_getpid(void);
 int sys_fork(struct trapframe *ctf, pid_t *retval);
 
+/* c2 - Alessandro Di Matteo [START] */
+
+/**
+ * [Author: Alessandro Di Matteo]
+ * internal counterpart for the user syscall execv(...).
+ * @param pathname the path of the executable to be runned.
+ * @param argv array of pointers to null-terminated strings that represent the argument list available to the new program,
+ * terminated by a null pointer.
+ * @returns On success, execv() does not return, on error -1 is returned, and errno is set to indicate the error:
+ * it can be one of `E2BIG`, `EACCESS`, `EAGAIN`, `EFAULT`, `EINVAL`, `EIO`, `EISDIR`,
+ * `ELIBBAD`, `ELOOP`, `EMFILE`, `ENAMETOOLONG`, `ENFILE`, `ENOENT`, `ENOEXEC`, `ENOMEM`,
+ * `ENOTDIR`, `EPERM`, `ETXTBSY`.
+ */
+int sys_execv(const char *pathname, char *const argv[]);
+
+/* c2 - Alessandro Di Matteo [END] */
+
 #endif
 
 #endif /* _SYSCALL_H_ */
