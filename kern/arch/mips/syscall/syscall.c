@@ -161,7 +161,7 @@ syscall(struct trapframe *tf)
 
 		/* c2 - Alessandro Di Matteo [START] */
 		case SYS_execv:
-			err = sys_execv(tf->tf_a0, tf->tf_a1);
+			err = sys_execv((const char*)tf->tf_a0, (char* const*)tf->tf_a1);
 				break;
 		/*  c2 - Alessandro Di Matteo [END] */
 #endif
