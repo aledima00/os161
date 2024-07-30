@@ -150,7 +150,7 @@ int sys_execv(const char *pathname, char *const argv[]){
     struct addrspace *newas=NULL; // next address space (after execv)
     vaddr_t *arg_ptrs=(vaddr_t*)NULL;
     
-    #define CLEANUP(){\
+    #define _EXECV_CLEANUP(){\
       if(progname!=NULL){\
         kfree(progname);\
         progname=NULL;\
@@ -169,9 +169,9 @@ int sys_execv(const char *pathname, char *const argv[]){
       }\
     }
 
-    #define HANDLE_ERROR(is_error,error,close_vfs,restore_oldas){\
+    #define _EXECV_HANDLE_ERROR(is_error,error,close_vfs,restore_oldas){\
       if(is_error){\
-        CLEANUP();\
+        _EXECV_CLEANUP();\
         if(close_vfs){\
           vfs_close(v);\
         }\
@@ -188,43 +188,43 @@ int sys_execv(const char *pathname, char *const argv[]){
     
 
     KASSERT(curproc!=NULL); // WRNING
-    HANDLE_ERROR(pathname == NULL,EFAULT,false,false); // NULL parameter
+    _EXECV_HANDLE_ERROR(pathname == NULL,EFAULT,false,false); // NULL parameter
 
     // Allocate kernel buffer for the program pathname
     progname = (char *)kmalloc(PATH_MAX*sizeof(char));
-    HANDLE_ERROR(progname == NULL,ENOMEM,false,false);
+    _EXECV_HANDLE_ERROR(progname == NULL,ENOMEM,false,false);
     
     // Copy the program pathname from user space to kernel space
     result = copyinstr((userptr_t)pathname, progname, PATH_MAX, &actual);
-    HANDLE_ERROR(result,result,false,false);
-    HANDLE_ERROR(strlen(progname)==0,EINVAL,false,false); // invalid (empty) parameter
+    _EXECV_HANDLE_ERROR(result,result,false,false);
+    _EXECV_HANDLE_ERROR(strlen(progname)==0,EINVAL,false,false); // invalid (empty) parameter
     
     // Check if argv is NULL
-    HANDLE_ERROR(argv==NULL,EFAULT,false,false);
+    _EXECV_HANDLE_ERROR(argv==NULL,EFAULT,false,false);
 
     // Count the number of arguments
     for(argc = 0; argv[argc] != NULL; argc++);
 
     // Allocate space for arguments in kernel space
     kargs = (char **)kmalloc((argc + 1) * sizeof(char *));
-    HANDLE_ERROR(kargs==NULL,ENOMEM,false,false);
+    _EXECV_HANDLE_ERROR(kargs==NULL,ENOMEM,false,false);
 
     // Copy each argument from user space to kernel space
     for (i = 0; i < argc; i++) {
         kargs[i] = (char *)kmalloc(ARG_MAX);
-        HANDLE_ERROR(kargs[i] == NULL,ENOMEM,false,false);
+        _EXECV_HANDLE_ERROR(kargs[i] == NULL,ENOMEM,false,false);
         result = copyinstr((const_userptr_t)argv[i], kargs[i], ARG_MAX, &actual);
-        HANDLE_ERROR(result,result,false,false);
+        _EXECV_HANDLE_ERROR(result,result,false,false);
     }
     kargs[argc] = NULL;
 
     // Open the executable file
     result = vfs_open(progname, O_RDONLY, 0, &v);
-    HANDLE_ERROR(result,result,false,false);
+    _EXECV_HANDLE_ERROR(result,result,false,false);
 
     // Create a new address space
     newas = as_create();
-    HANDLE_ERROR(newas==NULL,ENOMEM,true,false);
+    _EXECV_HANDLE_ERROR(newas==NULL,ENOMEM,true,false);
 
     // Save the old address space and switch to the new one
     oldas = proc_setas(newas);
@@ -238,18 +238,18 @@ int sys_execv(const char *pathname, char *const argv[]){
 
     // Define the user stack in the new address space
     result = as_define_stack(newas, &stackptr);
-    HANDLE_ERROR(result,result,false,true);
+    _EXECV_HANDLE_ERROR(result,result,false,true);
 
     // {argv} Allocate space for arguments vector in kernel space
     arg_ptrs = (vaddr_t *)kmalloc((argc + 1) * sizeof(vaddr_t));
-    HANDLE_ERROR(arg_ptrs == NULL,ENOMEM,false,true);
+    _EXECV_HANDLE_ERROR(arg_ptrs == NULL,ENOMEM,false,true);
 
     // {argv[i]} Allocate kernel space while gradually copying data into it and saving references
     for (i = argc - 1; i >= 0; i--) {
         size_t arglen = ROUNDUP(strlen(kargs[i]) + 1, 8);
         stackptr -= arglen;
         result = copyoutstr(kargs[i], (userptr_t)stackptr, arglen, NULL);
-        HANDLE_ERROR(result,result,false,true);
+        _EXECV_HANDLE_ERROR(result,result,false,true);
         arg_ptrs[i] = stackptr; // save pointer for the user-stack version of the array
     }
     arg_ptrs[argc] = (vaddr_t)NULL; // last is NULL (terminating)
@@ -257,13 +257,13 @@ int sys_execv(const char *pathname, char *const argv[]){
     // Allocate and save the vector of references into the stack (argv)
     stackptr -= sizeof(vaddr_t) * (argc + 1);
     result = copyout(arg_ptrs, (userptr_t)stackptr, sizeof(vaddr_t) * (argc + 1));
-    HANDLE_ERROR(result,result,false,true);
+    _EXECV_HANDLE_ERROR(result,result,false,true);
 
     // Clean up kernel allocated data
     kfree(curthread->t_name);
     curthread->t_name = progname;
-    progname=NULL; // move the reference -> not deleted by CLEANUP
-    CLEANUP();
+    progname=NULL; // move the reference -> not deleted by _EXECV_CLEANUP
+    _EXECV_CLEANUP();
     as_destroy(oldas);
 
     // Enter user mode and start executing the new process image
