@@ -78,8 +78,9 @@
 void
 syscall(struct trapframe *tf)
 {
+	off_t pos;
 	int callno;
-	int32_t retval;
+	int32_t retval,retval_low32, retval_upp32;
 	int err=0;
 
 	KASSERT(curthread != NULL);
@@ -101,56 +102,82 @@ syscall(struct trapframe *tf)
 
 	switch (callno) {
 	    case SYS_reboot:
-			err = sys_reboot(tf->tf_a0);
-			break;
+		err = sys_reboot(tf->tf_a0);
+		break;
+
 	    case SYS___time:
-			err = sys___time((userptr_t)tf->tf_a0,(userptr_t)tf->tf_a1);
-			break;
+		err = sys___time((userptr_t)tf->tf_a0,
+				 (userptr_t)tf->tf_a1);
+		break;
+
 	    /* Add stuff here */
 #if OPT_C2
 	    case SYS_write:
-	        retval = sys_write((int)tf->tf_a0,(userptr_t)tf->tf_a1,(size_t)tf->tf_a2);
-			/* error: function not implemented */
-            if (retval<0)
-				err = ENOSYS; 
-			else err = 0;
+	        retval = sys_write((int)tf->tf_a0,
+				(userptr_t)tf->tf_a1,
+				(size_t)tf->tf_a2,&err);
                 break;
 	    case SYS_read:
-	        retval = sys_read((int)tf->tf_a0,(userptr_t)tf->tf_a1,(size_t)tf->tf_a2);
-            if (retval<0)
-				err = ENOSYS; 
-			else err = 0;
+	        retval = sys_read((int)tf->tf_a0,
+				(userptr_t)tf->tf_a1,
+				(size_t)tf->tf_a2,&err);
                 break;
 		case SYS_open:
-	        retval = sys_open((userptr_t)tf->tf_a0,(int)tf->tf_a1,(mode_t)tf->tf_a2, &err);
-            break;
+	        retval = sys_open((userptr_t)tf->tf_a0,
+				  (int)tf->tf_a1,
+				  (mode_t)tf->tf_a2, &err);
+                break;
+
 	    case SYS_close:
 	        retval = sys_close((int)tf->tf_a0);
-			if (retval<0)
-				err = ENOENT; //here the error is present, in sys_open no?
-            break;
+			err = retval;	
+                break;
+		
+		case SYS_chdir:
+			err=sys_chdir((char *)tf->tf_a0);
+			break;
+		
+		case SYS_lseek:
+			
+			pos = tf->tf_a2;
+			pos <<= 32;
+			pos |= tf->tf_a3;
+			err = sys_lseek(
+				(int) tf->tf_a0,	/* file descriptor fd */
+				pos,	/* pos */
+				*(int32_t *)(tf->tf_sp+16),
+				(int32_t *) &retval_low32,
+				(int32_t *) &retval_upp32
+			);
+        	break;
+
+		case SYS___getcwd:
+			err = sys_getcwd(
+				(char *) tf->tf_a0,
+				(size_t) tf->tf_a1,
+				&retval_low32
+			);
 		case SYS_remove:
-	    	/* just ignore: do nothing */
+	      /* just ignore: do nothing */
 	        retval = 0;
-            break;
+                break;
 	    case SYS__exit:
 	        /* TODO: just avoid crash */
  	        sys__exit((int)tf->tf_a0);
-            break;
+                break;
 	    case SYS_waitpid:
-	        retval = sys_waitpid((pid_t)tf->tf_a0,(userptr_t)tf->tf_a1,(int)tf->tf_a2);
-			if (retval<0)
-				err = ENOSYS; 
-            break;
+	        retval = sys_waitpid((pid_t)tf->tf_a0,
+				(userptr_t)tf->tf_a1,
+				(int)tf->tf_a2,&err);
+                break;
 	    case SYS_getpid:
 	        retval = sys_getpid();
-            if (retval<0)
-				err = ENOSYS; 
-            break;
+                if (retval<0) err = ENOSYS; 
+		else err = 0;
+                break;
 	    case SYS_fork:
 	        err = sys_fork(tf,&retval);
-            break;
-
+                break;
 		/* c2 - Alessandro Di Matteo [START] */
 		case SYS_execv:
 			err = sys_execv((const char*)tf->tf_a0, (char* const*)tf->tf_a1);
@@ -159,9 +186,9 @@ syscall(struct trapframe *tf)
 #endif
 
 	    default:
-			kprintf("Unknown syscall %d\n", callno);
-			err = ENOSYS;
-			break;
+		kprintf("Unknown syscall %d\n", callno);
+		err = ENOSYS;
+		break;
 	}
 
 
