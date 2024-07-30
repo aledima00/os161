@@ -19,6 +19,8 @@
 #include <current.h>
 #include <synch.h>
 #include <kern/wait.h>
+#include <kern/fcntl.h>
+#include <vfs.h>
 
 
 /*
@@ -279,11 +281,12 @@ int sys_execv(const char *pathname, char *const argv[]){
     _EXECV_HANDLE_ERROR(result,result,false,false);
     _EXECV_HANDLE_ERROR(strlen(progname)==0,EINVAL,false,false); // invalid (empty) parameter
     
-    // Check if argv is NULL
+    // Check if argv ptr is a valid user process pointer
     _EXECV_HANDLE_ERROR(!is_user_pointer_valid((userptr_t)argv,sizeof(char*const)),EFAULT,false,false);
 
     // Count the number of arguments and check their validity
     for(argc = 0; argv[argc] != NULL; argc++){
+      // Check if argv[i] ptr is a valid user process pointer
       _EXECV_HANDLE_ERROR(!is_user_pointer_valid((userptr_t)argv[argc],sizeof(char)),EFAULT,false,false);
     }
 
