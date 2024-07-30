@@ -136,6 +136,11 @@ int sys_fork(struct trapframe *ctf, pid_t *retval) {
 /* c2 - Alessandro Di Matteo [START] */
 /* internal implementation of the syscall sys_execv(...). */
 
+static int is_user_pointer_valid(const userptr_t ptr, size_t size) {
+    char test;
+    return copyin(ptr, &test, size) == 0;
+}
+
 // Function to replace the current process image with a new one
 int sys_execv(const char *pathname, char *const argv[]){
 
@@ -184,9 +189,6 @@ int sys_execv(const char *pathname, char *const argv[]){
       }\
     }
 
-    
-    
-
     KASSERT(curproc!=NULL); // WRNING
     _EXECV_HANDLE_ERROR(pathname == NULL,EFAULT,false,false); // NULL parameter
 
@@ -200,10 +202,12 @@ int sys_execv(const char *pathname, char *const argv[]){
     _EXECV_HANDLE_ERROR(strlen(progname)==0,EINVAL,false,false); // invalid (empty) parameter
     
     // Check if argv is NULL
-    _EXECV_HANDLE_ERROR(argv==NULL,EFAULT,false,false);
+    _EXECV_HANDLE_ERROR(!is_user_pointer_valid((userptr_t)argv,sizeof(char*const)),EFAULT,false,false);
 
-    // Count the number of arguments
-    for(argc = 0; argv[argc] != NULL; argc++);
+    // Count the number of arguments and check their validity
+    for(argc = 0; argv[argc] != NULL; argc++){
+      _EXECV_HANDLE_ERROR(!is_user_pointer_valid((userptr_t)argv[argc],sizeof(char)),EFAULT,false,false);
+    }
 
     // Allocate space for arguments in kernel space
     kargs = (char **)kmalloc((argc + 1) * sizeof(char *));
