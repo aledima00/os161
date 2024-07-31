@@ -118,6 +118,7 @@ int sys_waitpid(pid_t pid, userptr_t statusp, int options, int *err) {
         // Use a temporary variable to ensure alignment
         int kstatus;
         kstatus = s;
+        kstatus = _MKWVAL(kstatus);
         // Copy the status back to user space
         int result = copyout(&kstatus, statusp, sizeof(kstatus));
         if (result) {
