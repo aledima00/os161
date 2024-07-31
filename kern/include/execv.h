@@ -4,7 +4,6 @@
 #include <types.h>
 #include <vfs.h>
 #include <addrspace.h>
-#include <errno.h>
 #include "opt-c2.h"
 
 #if OPT_C2

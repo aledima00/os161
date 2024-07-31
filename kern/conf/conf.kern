@@ -447,7 +447,7 @@ optfile net	test/nettest.c
 defoption c2 
 optfile c2 syscall/file_syscalls.c
 optfile c2 syscall/proc_syscalls.c
-optfile c2 syscall/exec_struct_functions
+optfile c2 syscall/execv.c
 
 defoption synch
 

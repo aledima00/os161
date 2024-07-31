@@ -1,8 +1,9 @@
 #include <execv.h>
-#include "string.h"
+#include <string.h>
 #include <kern/fcntl.h>
 #include <lib.h>
 #include <current.h>
+#include <kern/errno.h>
 
 static int is_userptr_valid(const userptr_t ptr, size_t size) {
     char test;
@@ -10,7 +11,8 @@ static int is_userptr_valid(const userptr_t ptr, size_t size) {
 }
 
 struct execdata* _create_execdata(void){
-    struct execdata* ret = (struct execdata*)kmalloc(sizeof(struct execdata));
+    struct execdata* ret=NULL;
+    ret = (struct execdata*)kmalloc(sizeof(struct execdata));
     if(ret==NULL)
         return ret;
     ret->v=NULL;
@@ -49,8 +51,6 @@ struct execdata* execdata_init(const char *pathname, char *const argv[]){
       // Check if argv[i] ptr is a valid user process pointer
       INIT_CONDITIONAL_RETURN(!is_userptr_valid((userptr_t)argv[ret->kargc], sizeof(char)), EINVAL);
     }
-
-    INIT_CONDITIONAL_RETURN(!is_userptr_valid((userptr_t)argv, sizeof(char*const)), EINVAL);
 
     ret->progname_len = strlen(pathname)+1;
     INIT_CONDITIONAL_RETURN(ret->progname_len==0,EINVAL);
@@ -108,7 +108,7 @@ void execdata_prepare(struct execdata* ed){
     ed->uargv = (vaddr_t *)kmalloc((ed->kargc + 1) * sizeof(vaddr_t));
     PREPARE_CONDITIONAL_RETURN(ed->uargv == NULL,ENOMEM);
 
-    // {argv[i]} Allocate user space while gradually copying data into it and saving references into uargv
+    // Allocate user stack while gradually copying argv[i] data into it and saving references into uargv
     for (unsigned int i = ed->kargc - 1; i >= 0; i--) {
         size_t arglen = ROUNDUP(strlen(ed->kargv[i]) + 1, 8); // align data on stack
         ed->stackptr -= arglen; // allocate stack
@@ -133,9 +133,6 @@ void execdata_switch(struct execdata* ed){
 
     // Enter user mode and start executing the new process image
     enter_new_process(ed->kargc, (userptr_t)ed->stackptr, NULL, ed->stackptr, ed->entrypoint);
-
-    // enter_new_process does not return if successful
-    panic("enter_new_process returned\n");
     return EINVAL; // Should never reach here
 }
 
@@ -170,4 +167,6 @@ void execdata_cleanup(struct execdata* ed){
     else if(ed->as_state==EXECV_NEWAS_DEFINED){
         as_destroy(ed->newas);
     }
+    kfree(ed);
+    ed=NULL;
 }
