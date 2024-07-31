@@ -139,6 +139,11 @@ int sys_read(int fd, userptr_t buf_ptr, size_t size, int *err) {
     }
     of->offset = ku.uio_offset;
     nread = size - ku.uio_resid;
+    if(nread==0){
+        lock_release(of->lock);
+        kfree(kbuf);
+        return nread;
+    }
     if (copyout(kbuf, buf_ptr, nread)) {
         *err = EFAULT;
         return -1;
