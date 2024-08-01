@@ -199,8 +199,11 @@ void execdata_switch(struct execdata* ed){
     if(curthread->t_name!=NULL){
         kfree(curthread->t_name);
     }
-    curthread->t_name = ed->progname;
-    ed->progname=NULL; // move the reference -> not deleted by cleanup
+    curthread->t_name = kstrdup(ed->progname);
+    if(curthread->t_name==NULL){
+        ed->errnum = ENOMEM;
+        return;
+    }
 
     // ----- cleans up unnecessary data without destroying the whole structure
     _execdata_cleanup(ed,(int)false);
