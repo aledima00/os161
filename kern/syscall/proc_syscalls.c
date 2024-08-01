@@ -218,11 +218,6 @@ int sys_fork(struct trapframe *ctf, pid_t *retval) {
 /* c2 - Alessandro Di Matteo [START] */
 /* internal implementation of the syscall sys_execv(...). */
 
-static int is_user_pointer_valid(const userptr_t ptr, size_t size) {
-    char test;
-    return copyin(ptr, &test, size) == 0;
-}
-
 // Function to replace the current process image with a new one
 int sys_execv(const char *pathname, char *const argv[]){
   int retval=0;
@@ -230,6 +225,7 @@ int sys_execv(const char *pathname, char *const argv[]){
 
   struct execdata* ed = execdata_init(pathname,argv);
   if(ed==NULL){
+    execdata_cleanup(ed);
     return ENOMEM; 
   }
   if(ed->errnum){

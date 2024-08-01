@@ -1,16 +1,18 @@
 #include <execv.h>
-#include <string.h>
 #include <kern/fcntl.h>
 #include <lib.h>
 #include <current.h>
 #include <kern/errno.h>
+#include <copyinout.h>
+#include <proc.h>
+#include <syscall.h>
 
 static int is_userptr_valid(const userptr_t ptr, size_t size) {
     char test;
     return copyin(ptr, &test, size) == 0;
 }
 
-struct execdata* _create_execdata(void){
+static struct execdata* _create_execdata(void){
     struct execdata* ret=NULL;
     ret = (struct execdata*)kmalloc(sizeof(struct execdata));
     if(ret==NULL)
@@ -29,9 +31,46 @@ struct execdata* _create_execdata(void){
     return ret;
 }
 
+static void _execdata_cleanup(struct execdata* ed, int to_be_destroyed){
+    if(ed->progname!=NULL){
+        kfree(ed->progname);
+        ed->progname=NULL;
+    }
+    if(ed->kargv!=NULL){
+        for(int j=0;j<ed->kargc && ed->kargv[j]!=NULL;j++){
+            kfree(ed->kargv[j]);
+            ed->kargv[j]=NULL;
+        }
+        kfree(ed->kargv);
+        ed->kargv=NULL;
+    }
+    if(ed->uargv!=NULL){
+        kfree(ed->uargv);
+        ed->uargv=NULL;
+    }
+    if(ed->vfs_state==EXECV_VFS_OPEN){
+        vfs_close(ed->v);
+    }
+    if(ed->as_state==EXECV_NEWAS_FIXED){
+        as_destroy(ed->oldas);
+    }
+    else if(ed->as_state==EXECV_NEWAS_SWITCHED){
+        proc_setas(ed->oldas);
+        as_activate();
+        as_destroy(ed->newas);
+    }
+    else if(ed->as_state==EXECV_NEWAS_DEFINED){
+        as_destroy(ed->newas);
+    }
+    if(to_be_destroyed){
+        kfree(ed);
+        ed=NULL;
+    }
+}
+
 #define __CONDITIONAL_RETURN(execdata_ptr,condition,error_code,retval){\
         if(condition){\
-            if(execdata_ptr->errnum!=EXECV_ERROR_ALR_SET){\
+            if(error_code!=EXECV_ERROR_ALR_SET){\
                 execdata_ptr->errnum=error_code;\
             }\
             return retval;\
@@ -45,15 +84,15 @@ struct execdata* execdata_init(const char *pathname, char *const argv[]){
     
     #define INIT_CONDITIONAL_RETURN(condition,error_code) __CONDITIONAL_RETURN(ret,condition,error_code,ret)
 
-    INIT_CONDITIONAL_RETURN(!is_userptr_valid((userptr_t)pathname,sizeof(const char*)),EINVAL);
-    INIT_CONDITIONAL_RETURN(!is_userptr_valid((userptr_t)argv, sizeof(char*const)), EINVAL);
+    INIT_CONDITIONAL_RETURN(!is_userptr_valid((userptr_t)pathname,sizeof(const char*)),EFAULT);
+    INIT_CONDITIONAL_RETURN(!is_userptr_valid((userptr_t)argv, sizeof(char*const)), EFAULT);
     for(ret->kargc = 0; argv[ret->kargc] != NULL; ret->kargc++){
       // Check if argv[i] ptr is a valid user process pointer
-      INIT_CONDITIONAL_RETURN(!is_userptr_valid((userptr_t)argv[ret->kargc], sizeof(char)), EINVAL);
+      INIT_CONDITIONAL_RETURN(!is_userptr_valid((userptr_t)argv[ret->kargc], sizeof(char)), EFAULT);
     }
 
     ret->progname_len = strlen(pathname)+1;
-    INIT_CONDITIONAL_RETURN(ret->progname_len==0,EINVAL);
+    INIT_CONDITIONAL_RETURN(ret->progname_len<=1,EINVAL);
 
     ret->progname = (char *)kmalloc(ret->progname_len*sizeof(char));
     INIT_CONDITIONAL_RETURN(ret->progname==NULL,ENOMEM);
@@ -63,16 +102,20 @@ struct execdata* execdata_init(const char *pathname, char *const argv[]){
 
     ret->kargv = (char **)kmalloc((ret->kargc + 1) * sizeof(char *));
     INIT_CONDITIONAL_RETURN(ret->kargv==NULL,ENOMEM);
+    for (int i = 0; i < ret->kargc; i++){
+        ret->kargv[i] = NULL; // NULL-init
+    }
 
     // Copy each argument from user space to kernel space
     for (int i = 0; i < ret->kargc; i++) {
-        unsigned int arglen = strlen(ret->kargv[i])+1;
+        size_t arglen = strlen(argv[i])+1;
         ret->kargv[i] = (char *)kmalloc(arglen*sizeof(char));
         INIT_CONDITIONAL_RETURN(ret->kargv==NULL,ENOMEM);
         ret->errnum = copyinstr((const_userptr_t)argv[i], ret->kargv[i], arglen, NULL);
         INIT_CONDITIONAL_RETURN(ret->errnum!=0,EXECV_ERROR_ALR_SET);
     }
     ret->kargv[ret->kargc] = NULL;
+    return ret;
 }
 
 void execdata_prepare(struct execdata* ed){
@@ -109,8 +152,10 @@ void execdata_prepare(struct execdata* ed){
     PREPARE_CONDITIONAL_RETURN(ed->uargv == NULL,ENOMEM);
 
     // Allocate user stack while gradually copying argv[i] data into it and saving references into uargv
-    for (unsigned int i = ed->kargc - 1; i >= 0; i--) {
+    for (int i = ed->kargc - 1; i >= 0; i--) {
         size_t arglen = ROUNDUP(strlen(ed->kargv[i]) + 1, 8); // align data on stack
+        // Check for potential underflow before decrementing stack pointer
+        PREPARE_CONDITIONAL_RETURN(ed->stackptr < arglen, ENOMEM);
         ed->stackptr -= arglen; // allocate stack
         ed->errnum = copyoutstr(ed->kargv[i], (userptr_t)ed->stackptr, arglen, NULL);
         PREPARE_CONDITIONAL_RETURN(ed->errnum!=0, EXECV_ERROR_ALR_SET);
@@ -118,55 +163,30 @@ void execdata_prepare(struct execdata* ed){
     }
     ed->uargv[ed->kargc] = (vaddr_t)NULL; // last is NULL (terminating)
 
-    // Allocate and save the vector of references into the stack (argv)
-    ed->stackptr -= sizeof(vaddr_t) * (ed->kargc + 1); // allocate last stack space for uargv
-    ed->errnum = copyout(ed->uargv, (userptr_t)ed->stackptr, sizeof(vaddr_t) * (ed->kargc + 1));
+    // Allocate and save the vector of references into the user stack (argv)
+    size_t uargv_size = sizeof(vaddr_t) * (ed->kargc + 1);
+    PREPARE_CONDITIONAL_RETURN(ed->stackptr < uargv_size, ENOMEM);
+    ed->stackptr -= uargv_size; // allocate last stack space for uargv
+    ed->errnum = copyout(ed->uargv, (userptr_t)ed->stackptr, uargv_size);
     PREPARE_CONDITIONAL_RETURN(ed->errnum!=0, EXECV_ERROR_ALR_SET);
 }
 
 void execdata_switch(struct execdata* ed){
     // Clean up kernel allocated data
-    kfree(curthread->t_name);
+    if(curthread->t_name!=NULL){
+        kfree(curthread->t_name);
+    }
     curthread->t_name = ed->progname;
     ed->progname=NULL; // move the reference -> not deleted by cleanup
-    execdata_cleanup(ed);
+    ed->as_state = EXECV_NEWAS_FIXED;
+    _execdata_cleanup(ed,(int)false);
 
     // Enter user mode and start executing the new process image
     enter_new_process(ed->kargc, (userptr_t)ed->stackptr, NULL, ed->stackptr, ed->entrypoint);
-    return EINVAL; // Should never reach here
+    ed->errnum=EINVAL;
+    return; // Should never reach here
 }
 
 void execdata_cleanup(struct execdata* ed){
-    if(ed->progname!=NULL){
-        kfree(ed->progname);
-        ed->progname=NULL;
-    }
-    if(ed->kargv!=NULL){
-        for(int j=0;j<ed->kargc && ed->kargv[j]!=NULL;j++){
-            kfree(ed->kargv[j]);
-            ed->kargv[j]=NULL;
-        }
-        kfree(ed->kargv);
-        ed->kargv=NULL;
-    }
-    if(ed->uargv!=NULL){
-        kfree(ed->uargv);
-        ed->uargv=NULL;
-    }
-    if(ed->vfs_state==EXECV_VFS_CLOSED){
-        vfs_close(ed->v);
-    }
-    if(ed->as_state==EXECV_NEWAS_FIXED){
-        as_destroy(ed->oldas);
-    }
-    else if(ed->as_state==EXECV_NEWAS_SWITCHED){
-        proc_setas(ed->oldas);
-        as_activate();
-        as_destroy(ed->newas);
-    }
-    else if(ed->as_state==EXECV_NEWAS_DEFINED){
-        as_destroy(ed->newas);
-    }
-    kfree(ed);
-    ed=NULL;
+    _execdata_cleanup(ed,true);
 }
