@@ -21,7 +21,6 @@ static struct execdata* _create_execdata(void){
     ret->kargv=NULL;
     ret->kargc=0;
     ret->progname=NULL;
-    ret->progname_len=0;
     ret->oldas=NULL;
     ret->newas=NULL;
     ret->uargv=NULL;
@@ -91,13 +90,13 @@ struct execdata* execdata_init(const char *pathname, char *const argv[]){
       INIT_CONDITIONAL_RETURN(!is_userptr_valid((userptr_t)argv[ret->kargc], sizeof(char)), EFAULT);
     }
 
-    ret->progname_len = strlen(pathname)+1;
-    INIT_CONDITIONAL_RETURN(ret->progname_len<=1,EINVAL);
+    int progname_len = strlen(pathname)+1;
+    INIT_CONDITIONAL_RETURN(progname_len<=1,EINVAL);
 
-    ret->progname = (char *)kmalloc(ret->progname_len*sizeof(char));
+    ret->progname = (char *)kmalloc(progname_len*sizeof(char));
     INIT_CONDITIONAL_RETURN(ret->progname==NULL,ENOMEM);
 
-    ret->errnum = copyinstr((userptr_t)pathname, ret->progname, ret->progname_len, NULL);
+    ret->errnum = copyinstr((userptr_t)pathname, ret->progname, progname_len, NULL);
     INIT_CONDITIONAL_RETURN(ret->errnum!=0,EXECV_ERROR_ALR_SET);
 
     ret->kargv = (char **)kmalloc((ret->kargc + 1) * sizeof(char *));
@@ -183,6 +182,10 @@ void execdata_switch(struct execdata* ed){
 
     // Enter user mode and start executing the new process image
     enter_new_process(ed->kargc, (userptr_t)ed->stackptr, NULL, ed->stackptr, ed->entrypoint);
+
+    // ------ should never reach this point ------
+    
+    panic("enter_new_process returned\n");
     ed->errnum=EINVAL;
     return; // Should never reach here
 }
