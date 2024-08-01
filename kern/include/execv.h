@@ -10,6 +10,7 @@
 
 #define EXECV_NO_ERROR 0
 #define EXECV_ERROR_ALR_SET -1
+// does not modify the .errnum field
 
 typedef enum execv_vfs_state_t{ // state of the vnode
     EXECV_VFS_OPEN, // Vnode should be closed when cleaning up
