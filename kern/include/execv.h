@@ -42,10 +42,9 @@ struct execdata{
 };
 
 /**
- * Create and initialize the execdata from the given parameters.
- * @return `NULL` if out of memory (no allocation), or a pointer to the allocated structure otherwise (still need to check for errors in the `.errnum` field)
+ * Initialize the execdata from the given parameters. Check `.errnum` field for errors.
  */
-struct execdata* execdata_init(const char *pathname, char *const argv[]);
+void execdata_init(struct execdata* ed, const char *pathname, char *const argv[]);
 
 /**
  * Creates the new AS and loads it with the executable; it also defines the stack and fills it with arguments. Check `.errnum` field for errors.

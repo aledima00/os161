@@ -223,29 +223,26 @@ int sys_execv(const char *pathname, char *const argv[]){
   int retval=0;
   KASSERT(curproc!=NULL); // Ensure the current process is valid
 
-  struct execdata* ed = execdata_init(pathname,argv); // try to create and initialize the needed structure
-  if(ed==NULL){ // failed allocation
-    execdata_cleanup(ed);
-    return ENOMEM; 
-  }
-  if(ed->errnum){ // error during initialization
-    retval = ed->errnum;
-    execdata_cleanup(ed);
+  struct execdata ed;
+  execdata_init(&ed,pathname,argv); // initialize the execdata structure
+  if(ed.errnum){ // error during initialization
+    retval = ed.errnum;
+    execdata_cleanup(&ed);
     return retval;
   }
-  execdata_prepare(ed); // prepare by creating the new AS and loading it with the executable; also defines the stack and fills it with arguments
-  if(ed->errnum){ // error during preparation
-    retval = ed->errnum;
-    execdata_cleanup(ed);
+  execdata_prepare(&ed); // prepare by creating the new AS and loading it with the executable; also defines the stack and fills it with arguments
+  if(ed.errnum){ // error during preparation
+    retval = ed.errnum;
+    execdata_cleanup(&ed);
     return retval;
   }
 
-  execdata_switch(ed); // switches to new process, should never return
+  execdata_switch(&ed); // switches to new process, should never return
 
   // ------ should never reach this point ------
 
-  retval = ed->errnum;
-  execdata_cleanup(ed);
+  retval = ed.errnum;
+  execdata_cleanup(&ed);
   return retval; // Should never reach here
 }
 
