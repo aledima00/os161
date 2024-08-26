@@ -113,7 +113,7 @@ int sys_read(int fd, userptr_t buf_ptr, size_t size, int *err) {
         *err = EBADF;
         return -1;
     }
-
+   
    
     kbuf = kmalloc(size);
     if (kbuf == NULL) {
@@ -139,10 +139,11 @@ int sys_read(int fd, userptr_t buf_ptr, size_t size, int *err) {
     }
     of->offset = ku.uio_offset;
     nread = size - ku.uio_resid;
-    if(nread==0){
+    
+    if(nread==0){ //nothing has been read
         lock_release(of->lock);
         kfree(kbuf);
-        return nread;
+        return nread; //no need to copy out in the kernel buffer in this case
     }
     if (copyout(kbuf, buf_ptr, nread)) {
         *err = EFAULT;
@@ -152,7 +153,6 @@ int sys_read(int fd, userptr_t buf_ptr, size_t size, int *err) {
     kfree(kbuf);
     return nread;
 }
-
 
 
 /*
@@ -181,6 +181,8 @@ int sys_open(userptr_t path, int openflags, mode_t mode, int *errp) {
         *errp = result;
         return -1;
     }
+
+
 
     if ((vaddr_t)path >= 0x80000000) {
         kfree(kbuffer);
@@ -265,6 +267,9 @@ int sys_open(userptr_t path, int openflags, mode_t mode, int *errp) {
     return fd;
 }
 
+
+
+
 int sys_close(int fd) {
     struct openfile *of;
 
@@ -332,6 +337,7 @@ int sys_chdir(const char *user_path) {
 int sys_lseek(int fd, off_t pos, int whence, int32_t *retval_low32, int32_t *retval_upp32) {
     KASSERT(curproc != NULL);
 
+    // Validate the file descriptor
     if (fd < 0 || fd >= OPEN_MAX || curproc->fileTable[fd] == NULL) {
         return EBADF;
     }
@@ -341,14 +347,16 @@ int sys_lseek(int fd, off_t pos, int whence, int32_t *retval_low32, int32_t *ret
         return EBADF;
     }
 
+    // Check if the file is seekable
     if (!VOP_ISSEEKABLE(of->vn)) {
         return ESPIPE;
     }
 
     struct stat file_stat;
-    int err;
     off_t new_offset;
+    int err;
 
+    // Acquire the lock for the open file
     lock_acquire(of->lock);
 
     switch (whence) {
@@ -361,7 +369,7 @@ int sys_lseek(int fd, off_t pos, int whence, int32_t *retval_low32, int32_t *ret
             break;
 
         case SEEK_CUR:
-            if (pos < 0 && -pos > of->offset) {
+            if (of->offset + pos < 0) {
                 lock_release(of->lock);
                 return EINVAL;
             }
@@ -374,7 +382,7 @@ int sys_lseek(int fd, off_t pos, int whence, int32_t *retval_low32, int32_t *ret
                 lock_release(of->lock);
                 return err;
             }
-            if (pos < 0 && -pos > file_stat.st_size) {
+            if (file_stat.st_size + pos < 0) {
                 lock_release(of->lock);
                 return EINVAL;
             }
@@ -386,35 +394,109 @@ int sys_lseek(int fd, off_t pos, int whence, int32_t *retval_low32, int32_t *ret
             return EINVAL;
     }
 
+    // Update the file offset
     of->offset = new_offset;
+    
+    // Release the lock after updating the offset
     lock_release(of->lock);
 
+    // Set the return values (split the offset into low and high 32-bit parts)
+    *retval_upp32 = (int32_t)(new_offset >> 32);
     *retval_low32 = (int32_t)(new_offset & 0xFFFFFFFF);
-    *retval_upp32 = (int32_t)((new_offset >> 32) & 0xFFFFFFFF);
 
     return 0;
 }
+
+
+
+
+
+
+
+int sys_dup2(int oldfd, int newfd, int32_t *retval) {
+    struct openfile *of_old;
+    struct openfile *of_new;
+    struct vnode *vn;
+
+    // Ensure the current process and its file table are valid
+    KASSERT(curproc != NULL);
+    KASSERT(curproc->fileTable != NULL);
+
+    // Validate file descriptors
+    if (oldfd < 0 || oldfd >= OPEN_MAX || newfd < 0 || newfd >= OPEN_MAX) {
+        return EBADF; // Invalid file descriptor
+    }
+
+    // Check if oldfd refers to a valid open file
+    of_old = curproc->fileTable[oldfd];
+    if (of_old == NULL) {
+        return EBADF; // Invalid file descriptor
+    }
+
+    // If oldfd and newfd are the same, no action is needed
+    if (oldfd == newfd) {
+        *retval = newfd;
+        return 0; // Success, no changes needed
+    }
+
+    // Handle case where newfd is already associated with an open file
+    of_new = curproc->fileTable[newfd];
+    if (of_new != NULL) {
+        lock_acquire(of_new->lock);
+        curproc->fileTable[newfd] = NULL;
+        if (--of_new->countRef == 0) {
+            // Close the vnode if no more references to this file
+            vn = of_new->vn;
+            of_new->vn = NULL;
+            vfs_close(vn);
+        }
+        lock_release(of_new->lock);
+    }
+
+    // Increment the reference count of the old file descriptor's openfile
+    lock_acquire(of_old->lock);
+    of_old->countRef++;
+    lock_release(of_old->lock);
+
+    // Assign the openfile from oldfd to newfd, effectively duplicating the descriptor
+    curproc->fileTable[newfd] = of_old;
+
+    // Return the new file descriptor to the caller
+    *retval = newfd;
+    return 0;
+}
+
+
 
 int sys_getcwd(char *buf, size_t buflen, int32_t *retval) {
     KASSERT(curthread != NULL);
     KASSERT(curthread->t_proc != NULL);
 
+    // Check if the buffer pointer is NULL
     if (buf == NULL) {
-        return EFAULT;
+        return EFAULT; // Bad memory address
     }
+
+    // Check if the buffer length is zero
     if (buflen == 0) {
-        return EINVAL;
+        return EINVAL; // Invalid argument
+    }
+
+    // Check if the buffer pointer is in user space
+    int result;
+    char temp;
+    result = copyout(&temp, (userptr_t)buf, sizeof(temp));
+    if (result != 0) {
+        return EFAULT; // Bad memory address
     }
 
     struct uio u;
     struct iovec iov;
-
     iov.iov_ubase = (userptr_t)buf;
     iov.iov_len = buflen;
-
     u.uio_iov = &iov;
     u.uio_iovcnt = 1;
-    u.uio_resid = buflen;
+    u.uio_resid = buflen; // Set to full buffer length initially
     u.uio_offset = 0;
     u.uio_segflg = UIO_USERSPACE;
     u.uio_rw = UIO_READ;
@@ -425,8 +507,9 @@ int sys_getcwd(char *buf, size_t buflen, int32_t *retval) {
         return err;
     }
 
-    if (u.uio_resid > 0) {
-        return ERANGE;
+    // Check if the buffer was large enough
+    if (u.uio_resid == buflen) {
+        return ERANGE; // No data written, buffer too small
     }
 
     *retval = buflen - u.uio_resid;

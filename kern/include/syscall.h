@@ -1,3 +1,4 @@
+
 /*
  * Copyright (c) 2000, 2001, 2002, 2003, 2004, 2005, 2008, 2009
  *	The President and Fellows of Harvard College.
@@ -70,6 +71,7 @@ int sys_close(int fd);
 int sys_chdir(const char *path);
 int sys_lseek(int fd, off_t pos, int whence, int32_t *retval_low32, int32_t *retval_upp32);
 int sys_getcwd(char *buf, size_t buflen, int32_t *retval);
+int sys_dup2(int oldfd, int newfd, int32_t *retval);
 
 int sys_write(int fd, userptr_t buf_ptr, size_t size,int *err);
 int sys_read(int fd, userptr_t buf_ptr, size_t size, int *err);

@@ -1,10 +1,3 @@
-/*
- * AUthor: G.Cabodi
- * Very simple implementation of sys__exit.
- * It just avoids crash/panic. Full process exit still TODO
- * Address space is released
- */
-
 #include <types.h>
 #include <kern/unistd.h>
 #include <kern/errno.h>
@@ -23,14 +16,12 @@
 #include <vfs.h>
 #include <execv.h>
 
-
 /*
  * system calls for process management
  */
 void
 sys__exit(int status) 
 {
-#if OPT_C2
   struct proc *p = curproc;
   p->p_status = status & 0xff; /* just lower 8 bits returned */
   spinlock_acquire(&p->p_lock);
@@ -38,17 +29,12 @@ sys__exit(int status)
   spinlock_release(&p->p_lock);
   proc_remthread(curthread);
   proc_signal_end(p); //It signals the end of a process, does not destroy the proc
-#else
-  /* get address space of current process and destroy */
-  struct addrspace *as = proc_getas();
-  as_destroy(as);
-#endif
+
   thread_exit();
   panic("thread_exit returned (should not happen)\n");
 }
 
 int sys_waitpid(pid_t pid, userptr_t statusp, int options, int *err) {
-#if OPT_C2
     /*pid can be >0, -1 or <-1. The latter case is not considered because it references the group id (not handled)
       pid = -1 should wait for any of its child 
       this means that the pid is constrained to be >0*/
@@ -118,8 +104,7 @@ int sys_waitpid(pid_t pid, userptr_t statusp, int options, int *err) {
     if (statusp != NULL) {
         // Use a temporary variable to ensure alignment
         int kstatus;
-        kstatus = s;
-        kstatus = _MKWVAL(kstatus);
+        kstatus = _MKWVAL(s);
         // Copy the status back to user space
         int result = copyout(&kstatus, statusp, sizeof(kstatus));
         if (result) {
@@ -127,21 +112,17 @@ int sys_waitpid(pid_t pid, userptr_t statusp, int options, int *err) {
             return -1;
         }
     }
-
     return pid;
-#endif
 }
 
 pid_t
 sys_getpid(void)
 {
-  #if OPT_C2
     KASSERT(curproc != NULL);
     return curproc->p_pid;
-  #endif
 }
 
-#if OPT_C2
+
 static void
 call_enter_forked_process(void *tfv, unsigned long dummy) {
   struct trapframe *tf = (struct trapframe *)tfv;
@@ -211,10 +192,6 @@ int sys_fork(struct trapframe *ctf, pid_t *retval) {
   return 0;
 }
 
-#endif
-
-#if OPT_C2
-
 /* c2 - Alessandro Di Matteo [START] */
 /* internal implementation of the syscall sys_execv(...). */
 
@@ -248,5 +225,4 @@ int sys_execv(const char *pathname, char *const argv[]){
 
 /* c2 - Alessandro Di Matteo [END] */
 
-#endif
 

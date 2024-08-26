@@ -215,7 +215,7 @@ proc_end_waitpid(struct proc *proc) {
 #endif
 }
 /*
- *General purpose function used to initialize stdin,stdout and stderr to point to con:
+ *Function used to initialize stdin,stdout and stderr to point to con:
  */
 #if OPT_C2
 static int std_init(struct proc *proc, int fd, int mode) {
@@ -471,11 +471,11 @@ proc_create_runprogram(const char *name)
 	newproc->p_addrspace = NULL;
 	/*Initialization of stdin,stdout and stderr to point to the console device*/
 	if (std_init( newproc, 0, O_RDONLY) == -1) {
-		return NULL;
+		return NULL; proc_destroy(newproc);
 	} else if (std_init(newproc, 1, O_WRONLY) == -1) {
-		return NULL;
+		return NULL; proc_destroy(newproc);
 	} else if (std_init(newproc, 2, O_WRONLY) == -1) {
-		return NULL;
+		return NULL; proc_destroy(newproc);
 	}
 	/* VFS fields */
 
@@ -535,7 +535,8 @@ proc_addthread(struct proc *proc, struct thread *t)
  */
 void proc_remove_all_threads(struct proc *p) {
     KASSERT(p != NULL);
-
+	int spl;
+	spl = splhigh();
     while (true) {
         spinlock_acquire(&p->p_lock);
 
@@ -562,8 +563,9 @@ void proc_remove_all_threads(struct proc *p) {
 
         // Terminate the removed thread
 		if(thread_to_remove != curthread)
-        	thread_destroy(thread_to_remove); //Cannot be called on the current thread or on a thread which is in running state
+        	thread_destroy(thread_to_remove); //Cannot be called on the current thread or on a thread which is in running state>
     }
+	splx(spl);
 	sys__exit(-1); //the process ends with an error
 }
 

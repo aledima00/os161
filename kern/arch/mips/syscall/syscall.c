@@ -1,3 +1,5 @@
+
+
 /*
  * Copyright (c) 2000, 2001, 2002, 2003, 2004, 2005, 2008, 2009
  *	The President and Fellows of Harvard College.
@@ -80,7 +82,7 @@ syscall(struct trapframe *tf)
 {
 	off_t pos;
 	int callno;
-	int32_t retval,retval_low32, retval_upp32;
+	int32_t retval_low32, retval_upp32;
 	int err=0;
 
 	KASSERT(curthread != NULL);
@@ -98,7 +100,7 @@ syscall(struct trapframe *tf)
 	 * like write.
 	 */
 
-	retval = 0;
+
 
 	switch (callno) {
 	    case SYS_reboot:
@@ -113,24 +115,24 @@ syscall(struct trapframe *tf)
 	    /* Add stuff here */
 #if OPT_C2
 	    case SYS_write:
-	        retval = sys_write((int)tf->tf_a0,
+	        retval_low32 = sys_write((int)tf->tf_a0,
 				(userptr_t)tf->tf_a1,
 				(size_t)tf->tf_a2,&err);
                 break;
 	    case SYS_read:
-	        retval = sys_read((int)tf->tf_a0,
+	        retval_low32 = sys_read((int)tf->tf_a0,
 				(userptr_t)tf->tf_a1,
 				(size_t)tf->tf_a2,&err);
                 break;
 		case SYS_open:
-	        retval = sys_open((userptr_t)tf->tf_a0,
+	        retval_low32 = sys_open((userptr_t)tf->tf_a0,
 				  (int)tf->tf_a1,
 				  (mode_t)tf->tf_a2, &err);
                 break;
 
 	    case SYS_close:
-	        retval = sys_close((int)tf->tf_a0);
-			err = retval;	
+	        retval_low32 = sys_close((int)tf->tf_a0);
+			err = retval_low32;	
                 break;
 		
 		case SYS_chdir:
@@ -146,8 +148,8 @@ syscall(struct trapframe *tf)
 				(int) tf->tf_a0,	/* file descriptor fd */
 				pos,	/* pos */
 				*(int32_t *)(tf->tf_sp+16),
-				(int32_t *) &retval_low32,
-				(int32_t *) &retval_upp32
+				(int32_t *) &retval_upp32,
+				(int32_t *) &retval_low32
 			);
         	break;
 
@@ -157,26 +159,37 @@ syscall(struct trapframe *tf)
 				(size_t) tf->tf_a1,
 				&retval_low32
 			);
+			break;
+
+		case SYS_dup2:
+			err = sys_dup2(
+				(int) tf->tf_a0,
+				(int) tf->tf_a1,
+				&retval_low32
+			);
+		break;
+
+
 		case SYS_remove:
 	      /* just ignore: do nothing */
-	        retval = 0;
+	        retval_low32 = 0;
                 break;
 	    case SYS__exit:
 	        /* TODO: just avoid crash */
  	        sys__exit((int)tf->tf_a0);
                 break;
 	    case SYS_waitpid:
-	        retval = sys_waitpid((pid_t)tf->tf_a0,
+	        retval_low32 = sys_waitpid((pid_t)tf->tf_a0,
 				(userptr_t)tf->tf_a1,
 				(int)tf->tf_a2,&err);
                 break;
 	    case SYS_getpid:
-	        retval = sys_getpid();
-                if (retval<0) err = ENOSYS; 
+	        retval_low32 = sys_getpid();
+                if (retval_low32<0) err = ENOSYS; 
 		else err = 0;
                 break;
 	    case SYS_fork:
-	        err = sys_fork(tf,&retval);
+	        err = sys_fork(tf,&retval_low32);
                 break;
 		/* c2 - Alessandro Di Matteo [START] */
 		case SYS_execv:
@@ -203,7 +216,8 @@ syscall(struct trapframe *tf)
 	}
 	else {
 		/* Success. */
-		tf->tf_v0 = retval;
+		tf->tf_v0 = retval_low32;
+		tf->tf_v1 = retval_upp32;
 		tf->tf_a3 = 0;      /* signal no error */
 	}
 
