@@ -450,4 +450,5 @@ optfile c2 syscall/proc_syscalls.c
 optfile c2 syscall/execv.c
 
 defoption synch
+defoption cwdname
 

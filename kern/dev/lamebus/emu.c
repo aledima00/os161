@@ -54,6 +54,7 @@
 #include <vfs.h>
 #include <emufs.h>
 #include "autoconf.h"
+#include <opt-cwdname.h>
 
 /* Register offsets */
 #define REG_HANDLE    0
@@ -786,6 +787,9 @@ emufs_lookup(struct vnode *dir, char *pathname, struct vnode **ret)
 	}
 
 	*ret = &newguy->ev_v;
+#if OPT_CWDNAME
+	((struct emufs_vnode*)(*ret)->vn_data)->name = kstrdup(pathname);
+#endif
 	return 0;
 }
 
@@ -837,10 +841,28 @@ emufs_namefile(struct vnode *v, struct uio *uio)
 		 */
 		return 0;
 	}
+#if OPT_CWDNAME
 
-	(void)uio;
+	// Retrieve the name of the vnode (file/directory) - hypothetical function or member
+    const char* filename = ev->name; // This assumes `emufs_vnode` has a filename member.
 
+    // Ensure the file name exists
+    if (filename == NULL) {
+        return ENOENT;  // No such file or directory
+    }
+
+    // Copy the filename into the uio structure (or prepare the name)
+    size_t len = strlen(filename);
+    if (uio->uio_resid < len) {
+        return ENAMETOOLONG; // Error if the name is too long for the buffer
+    }
+	
+	// Copy the filename to the uio structure for return
+    return uiomove((void *)filename, len, uio);
+#else
 	return ENOSYS;
+#endif
+
 }
 
 /*
@@ -1179,6 +1201,10 @@ emufs_loadvnode(struct emufs_fs *ef, uint32_t handle, int isdir,
 
 	ev->ev_emu = ef->ef_emu;
 	ev->ev_handle = handle;
+
+#if OPT_CWDNAME
+	ev->name=NULL;
+#endif
 
 	result = vnode_init(&ev->ev_v, isdir ? &emufs_dirops : &emufs_fileops,
 			    &ef->ef_fs, ev);
